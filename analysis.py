@@ -18,6 +18,7 @@ from keras.applications.inception_v3 import InceptionV3, preprocess_input
 from keras.applications.vgg16 import VGG16
 from keras.preprocessing import image
 from keras.applications.vgg16 import preprocess_input
+from imgaug import augmenters as iaa
 
 config = tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True))
 session = tf.Session(config=config)
@@ -38,16 +39,23 @@ class net(object):
         self.saveFolder = saveFolder
         self.isTraining = isTraining
 
-        self.fileList = {"train":{},"test":{}}
-        for f in glob.glob("data/*.png"):
-            pid, fid = os.path.basename(f).replace(".png","").split("_")
-            pid, fid = int(pid), int(fid)
-            if pid%10==0: mode="test"
-            else:         mode="train"
-            if not pid in self.fileList[mode]: self.fileList[mode][pid]=[]
-            self.fileList[mode][pid].append(f)
+        if isTraining:
+            self.fileList = {"train":{},"test":{}}
+            for f in glob.glob("data/*.png"):
+                pid, fid = os.path.basename(f).replace(".png","").split("_")
+                pid, fid = int(pid), int(fid)
+                if pid%10==0: mode="test"
+                else:         mode="train"
+                if not pid in self.fileList[mode]: self.fileList[mode][pid]=[]
+                self.fileList[mode][pid].append(f)
 
-        print self.fileList
+            print self.fileList
+
+            self.imgAugSeq([iaa.GaussianBlur((0.,1.5)),
+                            iaa.ContrastNormalization((0.5,1.5)),
+                            iaa.Multiply((0.75,1.25)),
+                            iaa.PerspectiveTransform(scale=(0.01,0.1))
+                           ])
         return
 
     def loadOnePair(self,mode="all",samePair=True):
@@ -78,6 +86,8 @@ class net(object):
         img2 = cv2.resize(img2,(self.sizeX,self.sizeY),interpolation=cv2.INTER_CUBIC)
 
         # augumentation?
+        img1 = self.imgAugSeq(img1)
+        img2 = self.imgAugSeq(img2)
 
         # pre-process
         img1 = preprocess_input( np.expand_dims(img1,axis=0) )[0]
@@ -147,6 +157,7 @@ class net(object):
 
         dist = Lambda(euclidean_distance)([s1,s2])
         model = Model(inputs=[inImg1,inImg2], outputs=dist)
+        eval_model = Model(inputs=inImg1, outputs=s1)
 
         def contrastive_loss(y_true, y_pred):
             margin = 1
@@ -160,6 +171,7 @@ class net(object):
 
         model.summary()
         self.model = model
+        self.eval_model = eval_model
         self.graph = tf.get_default_graph()
 
         return
@@ -176,67 +188,17 @@ class net(object):
                                 steps_per_epoch=500,
                                 use_multiprocessing=False)
 
-    def test(self,movPath,outPath=None):
-        actDict = self.actDict
-        if movPath=="0":
-            movFileList = [0]
-        else:
-            movFileList = glob.glob(movPath)
+    def eval(self,img):
+        assert img.shape == (self.sizeY, self.sizeX, self.nColor)
+        img = preprocess_input( np.expand_dims(img,axis=0) )[0]
+        res = self.eval_model.predict(np.expand_dims(img,axis=0))[0]
+        return res
 
-        if outPath:
-            fourcc = cv2.VideoWriter_fourcc(*"H264")
-            out = cv2.VideoWriter(outPath,fourcc, 30.0, (self.sizeX*3*2,self.sizeY*3))
-        for movFile in movFileList:
-            mov = cv2.VideoCapture(movFile)
-            #inX = np.zeros((1,self.nLength,))
-            inX = np.zeros([1,self.nLength,] + [int(x) for x in self.premodel.output.shape[1:]])
-            if movFile==0:
-                fps = 30
-                totalLength = 1000000000
-            else:
-                fps         = float(mov.get(cv2.CAP_PROP_FPS))
-                totalLength = int(mov.get(cv2.CAP_PROP_FRAME_COUNT))
-            for _ in xrange(totalLength):
-                ret, frame = mov.read()
-                if not ret:
-                    print "ret is None"
-                    continue
-                if movFile==0:
-                    _,w,_ = frame.shape
-                    aspect = 4./3.
-                    h = w / aspect
-                    frame = frame[:,int(w/2-h/2):int(w/2+h/2)]
-                frame = cv2.resize(frame,(self.sizeX,self.sizeY))
-                oriFrame = frame.copy() # ここは元のものを保存
-                frame = self.prepareImg(frame)[0]
-                with self.pregraph.as_default():
-                    processed = self.premodel.predict(np.expand_dims(frame,axis=0))
-                #print frame.shape
-                inX[0,:-1] = inX[0,-1:]
-                inX[0,-1]  = processed
-                ######inX = preprocess_input(inX)
-                t   = self.model.predict(x=inX,batch_size=1)
-                img = processed[0]
-                map1 = img[:,:,:self.np_branch1]
-                map2 = img[:,:,self.np_branch1:self.np_branch1+self.np_branch2]
-                try:
-                    poseImg = self.showImg(oriFrame,map1,map2)
-                except:
-                    print "error occured"
-                v = t[0]
-                t = self.cvtCls2act(np.argmax(t[0]))
-                print t,v
-                frame   = cv2.resize(oriFrame,(self.sizeX*3,self.sizeY*3))
-                poseImg = cv2.resize(poseImg ,(self.sizeX*3,self.sizeY*3))
-                cv2.putText(poseImg,t,(10,30),cv2.FONT_HERSHEY_PLAIN, 2.0, (0, 255, 255), 2)
-                bothImg = cv2.hconcat([frame,poseImg])
-                cv2.imshow("both",bothImg)
-                if outPath: out.write(bothImg)
-                cv2.waitKey(int(1000/fps))
-            mov.release()
-        if outPath:
-            out.release()
-
+    def isSamePerson(self,vec1,vec2,threshold=0.5):
+        dist = np.linalg.norm(vec2-vec1)
+        return dist
+        if dist<threshold: return True
+        else: return False
 
 
 if __name__=="__main__":
