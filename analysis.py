@@ -24,6 +24,7 @@ config = tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True))
 session = tf.Session(config=config)
 tensorflow_backend.set_session(session)
 
+#####################################
 class net(object):
     def __init__(self,isTraining=True,nBatch=1,zdim=128,doFineTune=False,learnRate=1e-5,saveFolder="save"):
         self.nColor = 3
@@ -51,11 +52,11 @@ class net(object):
 
             print self.fileList
 
-            self.imgAugSeq([iaa.GaussianBlur((0.,1.5)),
-                            iaa.ContrastNormalization((0.5,1.5)),
-                            iaa.Multiply((0.75,1.25)),
-                            iaa.PerspectiveTransform(scale=(0.01,0.1))
-                           ])
+            self.imgAugSeq = iaa.Sequential([iaa.GaussianBlur((0.,1.5)),
+                                             iaa.ContrastNormalization((0.5,1.5)),
+                                             iaa.Multiply((0.75,1.25)),
+                                             iaa.PerspectiveTransform(scale=(0.,0.075))
+                                             ])
         return
 
     def loadOnePair(self,mode="all",samePair=True):
@@ -79,15 +80,11 @@ class net(object):
         img1 = cv2.cvtColor(img1,cv2.COLOR_BGR2RGB)
         img2 = cv2.cvtColor(img2,cv2.COLOR_BGR2RGB)
 
-        img1 = img1.astype(np.float64)
-        img2 = img2.astype(np.float64)
-        
         img1 = cv2.resize(img1,(self.sizeX,self.sizeY),interpolation=cv2.INTER_CUBIC)
         img2 = cv2.resize(img2,(self.sizeX,self.sizeY),interpolation=cv2.INTER_CUBIC)
 
-        # augumentation?
-        img1 = self.imgAugSeq(img1)
-        img2 = self.imgAugSeq(img2)
+        img1 = img1.astype(np.float64)
+        img2 = img2.astype(np.float64)
 
         # pre-process
         img1 = preprocess_input( np.expand_dims(img1,axis=0) )[0]
@@ -107,6 +104,10 @@ class net(object):
             batch_inX1[iBatch]  = img1
             batch_inX2[iBatch]  = img2
             batch_label[iBatch] = label
+
+        # augumentation?
+        batch_inX1 = self.imgAugSeq.augment_images(batch_inX1)
+        batch_inX2 = self.imgAugSeq.augment_images(batch_inX2)
 
         return {"inX1":batch_inX1,"inX2":batch_inX2},batch_label
 
@@ -186,7 +187,8 @@ class net(object):
                                 validation_data = self.yieldOne("test"),
                                 validation_steps = 20,
                                 steps_per_epoch=500,
-                                use_multiprocessing=False)
+                                use_multiprocessing=True,
+                                workers=3)
 
     def eval(self,img):
         assert img.shape == (self.sizeY, self.sizeX, self.nColor)
