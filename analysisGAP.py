@@ -139,8 +139,8 @@ class net(object):
 
             inX = Input(shape=input_shape)
             h = myvgg(inX)
-            #h = GlobalAveragePooling2D()(h)
-            h = Flatten()(h)
+            h = GlobalAveragePooling2D()(h)
+            #h = Flatten()(h)
             h = Dense(output_dim*4,activation="relu")  (h)
             h = Dropout(0.5)(h)
             h = Dense(output_dim*2,activation="relu")  (h)

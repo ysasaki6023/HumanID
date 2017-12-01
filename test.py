@@ -3,13 +3,14 @@ import os,sys,argparse,re,string,logging,random,csv,glob,cv2,math,h5py
 import numpy as np
 import pandas as pd
 
-from analysis import net
+from analysisGAP import net
 
 n = net(nBatch=1,learnRate=0,zdim = 128,isTraining=False,saveFolder=None)
 n.buildModel()
 n.reloadModel("save/test2_vgg16_zdim128_avgPooling/weights.177.hdf5")
 
-fileList = ["iwano2","iwano3","tanaka1","tanaka2","woman1"] + ["0012_01","0012_03"] + ["0045_02","0045_04"] + ["0026_02","0026_03"]
+#fileList = ["iwano2","iwano3","tanaka1","tanaka2","woman1"] + ["0012_01","0012_03"] + ["0045_02","0045_04"] + ["0026_02","0026_03"]
+fileList = ["iwano2","iwano3","tanaka1","tanaka2","woman1"]
 imgList = []
 pidList = []
 
